@@ -22,7 +22,7 @@ export function BaseLayerEditor(layer:Layer, onLayerChange: Function | undefined
         layer.startTime += 1;
         if (onLayerChange != undefined) onLayerChange();
     }
-    editorComponents.push(<div onClick={addStartTime}>Add Start Time</div>)
+    editorComponents.push(<div key={"addStartTime"} onClick={addStartTime}>Add Start Time</div>)
     return editorComponents
 // private startTime: number;
 // private duration: number;

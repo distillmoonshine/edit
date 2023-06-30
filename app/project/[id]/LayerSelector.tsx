@@ -1,7 +1,6 @@
 import Movie from "@/app/Data/Movie";
 import React, {useContext} from "react";
 import Layer from "@/app/Data/Layers/Layer";
-import {AppContext, AppContextData} from "@/app/appContext";
 import { useEffect } from "react";
 
 interface LayerSelectorProps {

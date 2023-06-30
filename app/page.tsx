@@ -4,6 +4,8 @@ import Editor from "@/app/project/[id]/Editor";
 
 export default function Home() {
     return (
-        <Editor></Editor>
+        <div>
+            HOME PAGE
+        </div>
     )
 }
