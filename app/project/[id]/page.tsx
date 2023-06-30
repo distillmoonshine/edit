@@ -7,12 +7,21 @@ import Editor from "@/app/project/[id]/Editor";
 import '../../custom.css'
 import '../../globals.css'
 
-import { SocketIOURL } from "@/app/api/socket";
+import {EditorSocketContext, EditorSocketStore, SocketIOURL} from "@/app/api/socket";
 export default function Page() {
     return (
-        <div>
-            <nav>Editor (Name)</nav>
-            <Editor/>
+        <div style={{
+            width:"100%",
+            height: "100%"
+        }}>
+            <EditorSocketStore>
+                <nav style={{
+                    backgroundColor: "black",
+                    color: "white"
+                }}>Editor (Name)</nav>
+
+                <Editor/>
+            </EditorSocketStore>
         </div>
     )
 
