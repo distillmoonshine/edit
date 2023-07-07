@@ -7,7 +7,7 @@ export default class Layer {
     public enabled: boolean;
     public name: string
 
-    constructor(startTime: number = 0, duration: number = 0, enabled: boolean = true) {
+    constructor(startTime: number = 0, duration: number = 5, enabled: boolean = true) {
         this.id = uuidv4();
         this.startTime = startTime;
         this.duration = duration;

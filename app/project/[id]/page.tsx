@@ -7,7 +7,8 @@ import Editor from "@/app/project/[id]/Editor";
 import '../../custom.css'
 import '../../globals.css'
 
-import {EditorSocketContext, EditorSocketStore, SocketIOURL} from "@/app/api/socket";
+import {EditorSocketContext, EditorSocketStore, SocketIOURL} from "@/app/Contexts/socket";
+import MovieContextStore, {MovieContext} from "@/app/Contexts/MovieContext";
 export default function Page() {
     return (
         <div style={{
@@ -15,12 +16,14 @@ export default function Page() {
             height: "100%"
         }}>
             <EditorSocketStore>
-                <nav style={{
-                    backgroundColor: "black",
-                    color: "white"
-                }}>Editor (Name)</nav>
+                <MovieContextStore>
+                    <nav style={{
+                        backgroundColor: "black",
+                        color: "white"
+                    }}>Editor (Name)</nav>
 
-                <Editor/>
+                    <Editor/>
+                </MovieContextStore>
             </EditorSocketStore>
         </div>
     )

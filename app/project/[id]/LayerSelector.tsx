@@ -2,35 +2,35 @@ import Movie from "@/app/Data/Movie";
 import React, {useContext} from "react";
 import Layer from "@/app/Data/Layers/Layer";
 import { useEffect } from "react";
+import EditorComponent from "@/app/project/[id]/EditorComponent";
+import {MovieContext} from "@/app/Contexts/MovieContext";
 
-interface LayerSelectorProps {
-    movie: Movie,
+export default function LayerSelector(props: {
     onMovieChange?: Function
-}
-
-export default function LayerSelector(props: LayerSelectorProps) {
+}) {
     const [, forceUpdate] = React.useReducer(() => ({}), {});
+    const movie = React.useContext(MovieContext);
     function addLayer() {
         console.log("Layer added");
-        if (props.movie.addLayer(new Layer())) {
-            console.log(props.movie.layers);
+        if (movie.addLayer(new Layer())) {
+            if (props.onMovieChange != undefined) props.onMovieChange(movie);
             forceUpdate();
-            if (props.onMovieChange != undefined) props.onMovieChange(props.movie);
         } else {
             alert("Failed to add layer.");
         }
 
     }
 
-    let layerDisplay = props.movie.layers.map((layer: Layer) => {
+    let layerList = movie.layers.map((layer: Layer) => {
         return <li key={layer.id}>{layer.name}</li>
     });
+
     return (
-        <div>
+        <EditorComponent>
             Layers
             <button onClick={addLayer}>Add</button>
-            {layerDisplay}
-        </div>
+            {layerList}
+        </EditorComponent>
     )
 
 }

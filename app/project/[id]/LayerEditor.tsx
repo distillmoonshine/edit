@@ -1,5 +1,6 @@
 import React from "react";
 import Layer from "@/app/Data/Layers/Layer";
+import EditorComponent from "@/app/project/[id]/EditorComponent";
 
 function IncompatibleEditorComponent() {
     return (
@@ -30,19 +31,18 @@ export function BaseLayerEditor(layer:Layer, onLayerChange: Function | undefined
 // protected name: string
 }
 
-interface LayerEditorProps {
+export default function LayerEditor(props: {
     layer: Layer,
-    onLayerChange?: Function
-}
-
-export default function LayerEditor(props: LayerEditorProps) {
+    onLayerChange?: Function,
+    hidden?: boolean
+}) {
     const editorComponents = [];
     editorComponents.push(BaseLayerEditor(props.layer));
     return (
-        <div>
+        <EditorComponent hidden={props.hidden}>
             Layer Editor
             <br/>
             {editorComponents}
-        </div>
+        </EditorComponent>
     )
 }

@@ -24,13 +24,12 @@ export const EditorSocketStore = (props: any) => {
     let socketRef = React.useRef(io(SocketIOURL,
         {
             path: '/socket',
+            // TODO: Set rejectUnauthorized to true to make the connection secure
             rejectUnauthorized: false,
             reconnection: true,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            agent: false,
-            upgrade:false,
-            reconnectionAttempts: 1,
+            reconnectionAttempts: 3,
             transports: ['websocket']
         }));
     return <EditorSocketContext.Provider value={socketRef.current}>{props.children}</EditorSocketContext.Provider>
