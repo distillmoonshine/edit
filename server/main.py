@@ -5,7 +5,8 @@ from flask_cors import CORS
 
 import json
 
-from aiortc import RTCIceCandidate, RTCIceGatherer, RTCIceServer, RTCConfiguration, RTCPeerConnection, RTCSessionDescription
+from aiortc import RTCIceCandidate, RTCRtpSender, RTCIceGatherer, RTCIceServer, RTCConfiguration, RTCPeerConnection, \
+    RTCSessionDescription
 from aiortc.contrib.media import MediaPlayer
 from aiortc.contrib.signaling import create_signaling
 
@@ -17,7 +18,7 @@ RTC_CONFIG = RTCConfiguration([
 ])
 
 # TODO: Secure CORS_ALLOWED_ORIGIN
-socket = SocketIO(app, logger=True, cors_allowed_origins="*", path="/socket")
+socket = SocketIO(app, cors_allowed_origins="*", path="/socket")
 
 rtc_peer_connections = {}
 
@@ -53,9 +54,12 @@ async def create_rtc_connection():
     # connection = RTCPeerConnection()
     connection = RTCPeerConnection(RTC_CONFIG)
     connection.addTransceiver("video", direction="sendonly")
+    connection.addTransceiver("audio", direction="sendonly")
+
     player = MediaPlayer("/Users/mjkwak/Developer/Moonshine/video-editor/server/videos/marcrober.mp4")
     # player = MediaPlayer('default:none', format='avfoundation', options={'video_size': '640x480'})
     connection.addTrack(player.video)
+    connection.addTrack(player.audio)
     # SDP : Session Description Protocol detailing media configuration
     # TYPE:
     constraint = {
@@ -65,6 +69,7 @@ async def create_rtc_connection():
 
     def onice(cand):
         print("CANDIDATE!!!! : ", cand)
+
     connection.on("icecandidate", onice)
 
     @connection.on("signalingstatechange")
@@ -83,11 +88,22 @@ async def create_rtc_connection():
     def iceconnectionstatechange():
         print("connection ice connection state changed: ", connection.iceConnectionState)
 
+    @connection.on("track")
+    def on_track(track):
+        print("Track received: ", track)
+
+    @connection.on("connectionstatechange")
+    async def on_connection_state_change():
+        print("Connection state changed: ", connection.connectionState)
+        if connection.connectionState == "failed":
+            print("Closing failed connection.")
+            await connection.close()
+
     return connection
 
 
 async def create_rtc_connection_offer(connection: RTCPeerConnection):
-    offer = await connection.createOffer()
+    offer = await connection.createAnswer()
 
     @connection.on("icecandidate")
     def on_icecandidate():
@@ -99,6 +115,20 @@ async def create_rtc_connection_offer(connection: RTCPeerConnection):
     while True:
         if connection.iceGatheringState == "complete": break
     return offer
+
+
+@socket.on("editor/play/offer_")
+def editor_play_offer(params):
+    print("Editor offer received. ", params)
+    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+    loop = asyncio.get_event_loop()
+    connection = loop.run_until_complete(create_rtc_connection())
+    loop.run_until_complete(connection.setRemoteDescription(offer))
+    answer = loop.run_until_complete(create_rtc_connection_offer(connection))
+    return {
+        "sdp": answer.sdp,
+        "type": answer.type
+    }
 
 
 @socket.on("editor/play/setServerDescription")
@@ -142,6 +172,55 @@ def editorPlayGetDescription(params):
         "type": offer.type
     }
 
+
+def force_codec(pc, sender, forced_codec):
+    kind = forced_codec.split("/")[0]
+    codecs = RTCRtpSender.getCapabilities(kind).codecs
+    transceiver = next(t for t in pc.getTransceivers() if t.sender == sender)
+    transceiver.setCodecPreferences(
+        [codec for codec in codecs if codec.mimeType == forced_codec]
+    )
+
+
+@socket.on("editor/play/offer2")
+def offer(params):
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(offer2(params))
+
+
+async def offer2(params):
+    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+
+    pc = RTCPeerConnection()
+
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange():
+        print("Connection state is %s" % pc.connectionState)
+        if pc.connectionState == "failed":
+            await pc.close()
+            pcs.discard(pc)
+
+    # open media source
+    player = MediaPlayer("videos/marcrober.mp4")
+    # player = MediaPlayer('default:none', format='avfoundation', options={'video_size': '640x480'})
+    audio = player.audio
+    video = player.video
+
+    if audio:
+        audio_sender = pc.addTrack(audio)
+
+    if video:
+        video_sender = pc.addTrack(video)
+
+    await pc.setRemoteDescription(offer)
+
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+
+    return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+
+
+pcs = set()
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':

@@ -15,14 +15,14 @@ export default function MoviePreview(props: MoviePreviewProps) {
     });
 
     const socket = React.useContext(EditorSocketContext)
-    let description: RTCSessionDescription;
-    let videoObj = React.useRef(document.createElement("video"));
-    let rtc_connection = React.useRef(new RTCPeerConnection({
-        iceServers: [
-            {
-                urls: "stun:stun.l.google.com:19302"
-            }
-        ]
+    let videoObj = React.useRef<HTMLVideoElement>(null);
+    let audioObj = React.useRef<HTMLAudioElement>(null);
+    let rtc_connection = React.useRef<RTCPeerConnection>(new RTCPeerConnection({
+        // iceServers: [
+        //     {
+        //         urls: "stun:stun.l.google.com:19302"
+        //     }
+        // ]
     })).current;
 
     const ice_candidates: RTCIceCandidate[] = [];
@@ -31,10 +31,48 @@ export default function MoviePreview(props: MoviePreviewProps) {
         setupConnection();
     })
 
+    const newPlay = () => {
+        // Create offer
+        rtc_connection.createOffer().then(offer => {
+            // offer created, set local description
+            return rtc_connection.setLocalDescription(offer);
+        }).then(() => {
+            // wait for ICE gathering to complete
+            console.log("Waiting for ICE gathering to complete");
+            return new Promise((resolve: Function) : void => {
+                if (rtc_connection.iceGatheringState === "complete") {
+                    resolve();
+                } else {
+                    const checkState = () => {
+                        if (rtc_connection.iceGatheringState === "complete") {
+                            rtc_connection.removeEventListener("icegatheringstatechange", checkState);
+                            resolve();
+                        }
+                    }
+                    rtc_connection.addEventListener("icegatheringstatechange", checkState);
+                }
+            });
+        }).then(() => {
+            return new Promise((resolve: Function) => {
+                let offer = rtc_connection.localDescription!;
+                // send offer to server
+                socket.emit("editor/play/offer2", {
+                    sdp: offer.sdp,
+                    type: offer.type
+                }, (response: any) => {
+                    return rtc_connection.setRemoteDescription({
+                        sdp: response.sdp,
+                        type: response.type
+                    });
+                });
+            })
+
+        });
+    };
+
     // Request playback
     const play = () => {
         socket.emit("editor/play/getDescription", {
-
         }, (response: any) => {
             // Set
             let description = new RTCSessionDescription({
@@ -45,6 +83,7 @@ export default function MoviePreview(props: MoviePreviewProps) {
                 rtc_connection.createAnswer().then((answer) => {
                     console.log("Answer generated: SDP: ", answer.sdp, ", TYPE: ", answer.type);
                     rtc_connection.setLocalDescription(answer).then(() => {
+                        console.log("Answer: ", answer);
                         socket.emit("editor/play/setServerDescription", {
                             "sdp": answer.sdp,
                             "type": answer.type
@@ -60,43 +99,50 @@ export default function MoviePreview(props: MoviePreviewProps) {
 
     function setupConnection(): RTCPeerConnection {
         rtc_connection.addTransceiver("video", { direction: "recvonly" });
-        rtc_connection.addEventListener("icecandidate", e => {
-            if (e.candidate) {
-                if (ice_candidates.includes(e.candidate)) {
-                    return;
-                }
-                ice_candidates.push(e.candidate);
-                console.log("Ice Candidate: ", e.candidate);
-                try {
-                    socket.emit("editor/play/newICECandidate", {
-                        type: "new-ice-candidate",
-                        value: {
-                            address: e.candidate.address,
-                            candidate: e.candidate.candidate,
-                            component: e.candidate.component,
-                            foundation: e.candidate.foundation,
-                            port: e.candidate.port,
-                            priority: e.candidate.priority,
-                            protocol: e.candidate.protocol,
-                            type: e.candidate.type,
-                            sdpMid: e.candidate.sdpMid
-                        }
-                    });
-                } catch (e) {
-                    console.error("iceCandidate Add Error: ", e);
-                }
-
-            }
-        });
+        rtc_connection.addTransceiver("audio", { direction: "recvonly" });
+        // rtc_connection.addEventListener("icecandidate", e => {
+        //     if (e.candidate) {
+        //         if (ice_candidates.includes(e.candidate)) {
+        //             return;
+        //         }
+        //         ice_candidates.push(e.candidate);
+        //         console.log("Ice Candidate: ", e.candidate);
+        //         try {
+        //             socket.emit("editor/play/newICECandidate", {
+        //                 type: "new-ice-candidate",
+        //                 value: {
+        //                     address: e.candidate.address,
+        //                     candidate: e.candidate.candidate,
+        //                     component: e.candidate.component,
+        //                     foundation: e.candidate.foundation,
+        //                     port: e.candidate.port,
+        //                     priority: e.candidate.priority,
+        //                     protocol: e.candidate.protocol,
+        //                     type: e.candidate.type,
+        //                     sdpMid: e.candidate.sdpMid
+        //                 }
+        //             });
+        //         } catch (e) {
+        //             console.error("iceCandidate Add Error: ", e);
+        //         }
+        //
+        //     }
+        // });
 
         // Connect audio / video
         rtc_connection.addEventListener("track", e => {
-            console.log("Stream received: ", e.streams[0]);
-            console.log("VideoObject: ", videoObj);
-            if (videoObj.current.srcObject !== e.streams[0]) {
-                // replace video if new video stream is available
-                videoObj.current.srcObject = e.streams[0];
+            console.log("Track: ", e);
+            if (e.track.kind == 'video') {
+                videoObj.current!.srcObject = e.streams[0];
+            } else if (e.track.kind == "audio") {
+                audioObj.current!.srcObject = e.streams[0];
             }
+            // console.log("Stream received: ", e.streams[0]);
+            // console.log("VideoObject: ", videoObj);
+            // if (videoObj.current.srcObject !== e.streams[0]) {
+            //     // replace video if new video stream is available
+            //     videoObj.current.srcObject = e.streams[0];
+            // }
         });
 
         if (props.debug) {
@@ -121,7 +167,8 @@ export default function MoviePreview(props: MoviePreviewProps) {
     return (
         <EditorComponent>
             <video id={"video!"} controls={true} ref={videoObj} playsInline={true} autoPlay={true}></video>
-            <button onClick={play}>
+            <audio autoPlay={true} ref={audioObj}></audio>
+            <button onClick={newPlay}>
                 Play
             </button>
 
