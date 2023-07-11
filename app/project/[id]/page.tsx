@@ -7,7 +7,7 @@ import Editor from "@/app/project/[id]/Editor";
 import '../../custom.css'
 import '../../globals.css'
 
-import {EditorSocketContext, EditorSocketStore, SocketIOURL} from "@/app/Contexts/socket";
+import {EditorContext, EditorContextStore, SocketIOURL} from "@/app/Contexts/EditorContext";
 import MovieContextStore, {MovieContext} from "@/app/Contexts/MovieContext";
 export default function Page() {
     return (
@@ -15,7 +15,7 @@ export default function Page() {
             width:"100%",
             height: "100%"
         }}>
-            <EditorSocketStore>
+            <EditorContextStore>
                 <MovieContextStore>
                     <nav style={{
                         backgroundColor: "black",
@@ -24,7 +24,7 @@ export default function Page() {
 
                     <Editor/>
                 </MovieContextStore>
-            </EditorSocketStore>
+            </EditorContextStore>
         </div>
     )
 

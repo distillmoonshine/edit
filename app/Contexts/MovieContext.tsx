@@ -1,11 +1,11 @@
 import React from "react";
 import Movie from "@/app/Data/Movie";
-import {EditorSocketContext} from "@/app/Contexts/socket";
+import {EditorContext} from "@/app/Contexts/EditorContext";
 
 export const MovieContext = React.createContext(new Movie());
 
 export default function MovieContextStore(props: any) {
-    const socket = React.useContext(EditorSocketContext);
+    const socket = React.useContext(EditorContext).socket;
 
     // Once initialized, fetch movie from Socket.IO server
     React.useEffect(() => {

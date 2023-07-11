@@ -3,12 +3,13 @@ import React from "react";
 import LayerSelector from "@/app/project/[id]/LayerSelector";
 import Movie from "@/app/Data/Movie";
 import LayerEditor from "@/app/project/[id]/LayerEditor";
-import { EditorSocketContext } from "@/app/Contexts/socket";
+import { EditorContext } from "@/app/Contexts/EditorContext";
 import {io, Socket} from "socket.io-client";
 import Timeline from "@/app/project/[id]/Timeline";
 import MovieToJSON from "@/app/project/[id]/MovieToJSON";
 import {MovieContext} from "@/app/Contexts/MovieContext";
 import MoviePreview from "@/app/project/[id]/MoviePreview";
+import ClientComponent from "@/app/ClientComponent";
 
 
 export default function Editor() {
@@ -17,7 +18,7 @@ export default function Editor() {
     console.log("Editor loaded");
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
     let currentMovie = React.useContext(MovieContext);
-    const socket = React.useContext(EditorSocketContext);
+    const socket = React.useContext(EditorContext).socket;
 
     function update(newMovie: Movie) {
         console.log("Movie update, movie.id : " + currentMovie.id);
@@ -49,22 +50,24 @@ export default function Editor() {
 
     return (
         <>
-            <style>
-                {
-                    `button {
-                        background-color: lightgray;
-                        padding: 2px;
-                        margin: 2px;
-                    }`
-                }
-            </style>
-            <span>Your movie has { currentMovie.layers.length } layers.</span>
-            <MoviePreview debug={DEBUG}/>
-            <LayerSelector onMovieChange={update}/>
-            { currentMovie.layers.length > 0 ?
-                <LayerEditor layer={currentMovie.layers[0]}></LayerEditor> : <></> }
-            <Timeline/>
-            <MovieToJSON movie={currentMovie}/>
+            <ClientComponent>
+                <style>
+                    {
+                        `button {
+                            background-color: lightgray;
+                            padding: 2px;
+                            margin: 2px;
+                        }`
+                    }
+                </style>
+                <span>Your movie has { currentMovie.layers.length } layers.</span>
+                <MoviePreview debug={DEBUG}/>
+                <LayerSelector onMovieChange={update}/>
+                { currentMovie.layers.length > 0 ?
+                    <LayerEditor layer={currentMovie.layers[0]}></LayerEditor> : <></> }
+                <Timeline/>
+                <MovieToJSON movie={currentMovie}/>
+            </ClientComponent>
         </>
     )
 }
