@@ -1,8 +1,8 @@
 import React from "react";
 import { Socket, io } from 'socket.io-client';
-export const SocketIOURL = "http://127.0.0.1:8080";
-
-
+// export const SocketIOURL = "http://server.mjkwak.me:8080";
+export const SocketIOURL = "http://34.214.255.246:8080";
+// export const SocketIOURL = "http://127.0.0.1:8080";
 /* Create Socket context instance with default io() method
  * autoConnect: false  => Prevents error message trying to connect to server
  */

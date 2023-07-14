@@ -17,17 +17,18 @@ export default function MoviePreview(props: MoviePreviewProps) {
     });
 
     const socket = React.useContext(EditorContext).socket;
+    const [useSTUN, setUseSTUN] = React.useState(true);
     let videoObj = React.useRef<HTMLVideoElement>(null);
     let audioObj = React.useRef<HTMLAudioElement>(null);
 
     const RTC_CONFIG = {
         iceServers: [
-            {
-                urls: "stun:stun.l.google.com:19302"
-            },
             // {
-            //     urls: "stun:stun.relay.metered.ca:80"
+            //     urls: "stun:stun.l.google.com:19302"
             // },
+            {
+                urls: "stun:stun.relay.metered.ca:80"
+            },
             {
                 urls: "turn:a.relay.metered.ca:80?transport=tcp",
                 username: "1a5f80da82906d67074d0b1b",
@@ -60,7 +61,7 @@ export default function MoviePreview(props: MoviePreviewProps) {
         setupConnection();
     })
 
-    const newPlay = () => {
+    const connect = () => {
         // Create offer
         const rtc_connection = setupConnection()!;
         rtc_connection.createOffer().then(offer => {
@@ -86,6 +87,7 @@ export default function MoviePreview(props: MoviePreviewProps) {
             console.log("ICE Gathering Complete");
             return new Promise((resolve: Function) => {
                 let offer = rtc_connection.localDescription!;
+                // Using REST API
                 // return fetch("http://localhost:8080/offer", {
                 //     body: JSON.stringify({
                 //         sdp: offer.sdp,
@@ -105,7 +107,7 @@ export default function MoviePreview(props: MoviePreviewProps) {
                 // });
 
                 // send offer to server
-                socket.emit("offer", {
+                socket.emit("rtc/connect", {
                     sdp: offer.sdp,
                     type: offer.type
                 }, (response: any) => {
@@ -122,10 +124,22 @@ export default function MoviePreview(props: MoviePreviewProps) {
         });
     };
 
+    const request_stream = () => {
+        socket.emit("rtc/stream");
+    }
+
     function setupConnection() {
         try {
-            // rtc_connection = new RTCPeerConnection(RTC_CONFIG);
-            const rtc_connection = new RTCPeerConnection();
+            const config: RTCConfiguration = {}
+            if (useSTUN) {
+                console.log("Using STUN server");
+                config.iceServers = [
+                    {
+                        urls: "stun:stun.relay.metered.ca:80"
+                    }
+                ]
+            }
+            const rtc_connection = new RTCPeerConnection(config);
             rtc_connection.addTransceiver("video", {direction: "recvonly"});
             rtc_connection.addTransceiver("audio", {direction: "recvonly"});
 
@@ -135,6 +149,10 @@ export default function MoviePreview(props: MoviePreviewProps) {
                 if (e.track.kind == 'video') {
                     videoObj.current!.srcObject = e.streams[0];
                 } else if (e.track.kind == "audio") {
+                    audioObj.current!.srcObject = e.streams[0];
+                } else {
+                    console.log("UNKNOWN STREAM");
+                    console.log(e);
                     audioObj.current!.srcObject = e.streams[0];
                 }
                 // console.log("Stream received: ", e.streams[0]);
@@ -169,50 +187,19 @@ export default function MoviePreview(props: MoviePreviewProps) {
         } catch (error) {
             console.log("[setupConnection] Error : ", error);
         }
-        // rtc_connection.addEventListener("icecandidate", e => {
-        //     if (e.candidate) {
-        //         if (ice_candidates.includes(e.candidate)) {
-        //             return;
-        //         }
-        //         ice_candidates.push(e.candidate);
-        //         console.log("Ice Candidate: ", e.candidate);
-        //         try {
-        //             socket.emit("editor/play/newICECandidate", {
-        //                 type: "new-ice-candidate",
-        //                 value: {
-        //                     address: e.candidate.address,
-        //                     candidate: e.candidate.candidate,
-        //                     component: e.candidate.component,
-        //                     foundation: e.candidate.foundation,
-        //                     port: e.candidate.port,
-        //                     priority: e.candidate.priority,
-        //                     protocol: e.candidate.protocol,
-        //                     type: e.candidate.type,
-        //                     sdpMid: e.candidate.sdpMid
-        //                 }
-        //             });
-        //         } catch (e) {
-        //             console.error("iceCandidate Add Error: ", e);
-        //         }
-        //
-        //     }
-        // });
     }
 
-    function showSDPStatus() {
-    //     console.log("RTC Connection: ", rtc_connection);
-    //     console.log("Local Description: ", rtc_connection.localDescription);
-    //     console.log("Remote Description: ", rtc_connection.remoteDescription);
-    //     alert(rtc_connection.connectionState);
-    }
     return (
         <EditorComponent>
             <video id={"video!"} controls={true} ref={videoObj} playsInline={true} autoPlay={true}></video>
             <audio autoPlay={true} ref={audioObj}></audio>
-            <button onClick={newPlay}>
-                Play
+            <button onClick={connect}>
+                Connect
             </button>
 
+            <button onClick={request_stream}>
+                Request Stream
+            </button>
 
             { props.debug ?
                 <div style={{color: "black"}}>
@@ -220,7 +207,7 @@ export default function MoviePreview(props: MoviePreviewProps) {
                     Gathering State: { status.ice_gathering_state }<br/>
                     Connection State: { status.ice_connection_state }<br/>
                     Signaling State: { status.signaling_state }<br/>
-                    <button onClick={showSDPStatus}>SDP Status</button>
+                    <input type={"checkbox"} checked={useSTUN} onChange={() => { setUseSTUN(!useSTUN) }}/> Use STUN
                 </div>
                 : <></> }
         </EditorComponent>
