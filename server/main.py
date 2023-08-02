@@ -1,11 +1,15 @@
 import asyncio
+
+import aiortc.contrib.media
 from aiohttp import web
 import socketio
 import json
 import aiohttp_cors
+from MediaPlaylist import MediaPlaylist
+from MediaPlayer import MediaPlayer
 
 from aiortc import RTCIceCandidate, RTCRtpSender, RTCIceGatherer, RTCIceServer, RTCConfiguration, RTCPeerConnection, RTCRtpTransceiver, RTCSessionDescription
-from aiortc.contrib.media import MediaPlayer, MediaBlackhole, MediaRelay
+# from aiortc.contrib.media import MediaPlayer, MediaBlackhole, MediaRelay
 from aiortc.contrib.signaling import create_signaling
 
 app = web.Application()
@@ -68,7 +72,7 @@ pcs = {}
 async def connect(sid, params):
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
     pc = RTCPeerConnection()
-    pcs[sid] = pc;
+    pcs[sid] = pc
 
     def log_info(msg, *args):
         logger.info(msg, *args)
@@ -107,11 +111,19 @@ async def connect(sid, params):
     await pc.setRemoteDescription(offer)
 
 
-    player = MediaPlayer("videos/marcrober.mp4")
+    player = MediaPlaylist()
+    player.add_file("videos/marcrober.mp4")
+    player.add_file("videos/marcrober1.mp4")
     if player.video:
         pc.addTrack(player.video)
     if player.audio:
         pc.addTrack(player.audio)
+
+    # player = MediaPlayer("videos/marcrober.mp4")
+    # if player.video:
+    #     pc.addTrack(player.video)
+    # if player.audio:
+    #     pc.addTrack(player.audio)
 
     # send answer
     answer = await pc.createAnswer()
@@ -132,7 +144,11 @@ async def stream(sid):
         pc = pcs[sid]
         if pc.connectionState == "connected":
             player = MediaPlayer("videos/marcrober1.mp4")
+            # pc.addTrack(player.video)
+            # pc.addTrack(player.audio)
+            # return
             if player.video:
+                pc.addTrack
                 print("Video detected, attaching video...")
                 # video_sender = pc.addTrack(player.video)
                 for sender in pcs[sid].getSenders():
