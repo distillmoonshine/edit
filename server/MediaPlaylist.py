@@ -2,6 +2,8 @@ import asyncio
 import threading
 import logging
 import errno
+import traceback
+
 import av
 from av import AudioFrame, VideoFrame
 import fractions
@@ -100,6 +102,7 @@ logger = logging.getLogger(__name__)
 
 def player_worker_decode(
     loop,
+    playlist,
     container,
     audio_track,
     video_track,
@@ -126,7 +129,8 @@ def player_worker_decode(
         try:
             frame = next(container.decode(*container.streams))
         except Exception as exc:
-            print("exception: ", type(exc))
+            print("exception: ", type(exc), traceback.format_exc())
+            print("File: ", container)
             if isinstance(exc, av.FFmpegError) and exc.errno == errno.EAGAIN:
                 time.sleep(0.01)
                 continue
@@ -168,11 +172,12 @@ def player_worker_decode(
 
             frame_time = frame.time
             asyncio.run_coroutine_threadsafe(video_track.put(frame), loop)
-    print("thread task closing")
+    quit_event.set()
+    playlist.load_next_media()
 
 
 class StreamDecoder:
-    def __init__(self, file, audio_queue, video_queue):
+    def __init__(self, playlist, file, audio_queue, video_queue):
         self.container = av.open(file=file, format=None, mode="r")
         self.thread_quit_event = threading.Event()
 
@@ -183,6 +188,7 @@ class StreamDecoder:
             target=player_worker_decode,
             args=(
                 asyncio.get_event_loop(),
+                playlist,
                 self.container,
                 audio_queue,
                 video_queue,
@@ -210,19 +216,18 @@ class PlaylistStreamTrack(MediaStreamTrack):
         return queue
 
     async def _dequeue(self):
-        print("[PlaylistStreamTrack._dequeue]", self._queue)
         if len(self._queue) > 0:
-            print("Queue length > 0")
             if not self._queue[0].empty():
-                print("frame available")
                 return await self._queue[0].get()
             else:
+                await asyncio.sleep(0.01)
+                return await self._dequeue()
                 print("Queue complete, loading next...")
                 self._queue.popleft()
                 return await self._dequeue()
         else:
-            print("Returning none")
-            return None
+            await asyncio.sleep(0.01)
+            return await self._dequeue()
 
     async def recv(self) -> Union[Frame, Packet]:
         if self.readyState != "live":
@@ -232,7 +237,6 @@ class PlaylistStreamTrack(MediaStreamTrack):
         self._player._start(self)
         data = await self._dequeue()
         # data = await self._queue[0].get()
-        print("Obtained data: ", data)
 
         if data is None:
             print("Data is None")
@@ -254,7 +258,6 @@ class PlaylistStreamTrack(MediaStreamTrack):
             else:
                 wait = self._start + data_time - time.time()
                 await asyncio.sleep(wait)
-        print("Returning ", data)
         return data
 
     def stop(self):
@@ -263,8 +266,8 @@ class PlaylistStreamTrack(MediaStreamTrack):
             self._player._stop(self)
             self._player = None
 
-    def popleft(self):
-        pass
+    def next_video(self):
+        self._queue.popleft()
 
 
 class MediaPlaylist:
@@ -307,12 +310,13 @@ class MediaPlaylist:
 
     def load_next_media(self):
         if len(self.__playlist_queue) == 0:
-            assert "No more files in playlist"
+            # self._stop()
+            return
 
         file = self.__playlist_queue.popleft()
         audio_queue = self.__audio.create_new_stream()
         video_queue = self.__video.create_new_stream()
-        decoder = StreamDecoder(file, audio_queue, video_queue)
+        decoder = StreamDecoder(self, file, audio_queue, video_queue)
         self.__decoders.append(decoder)
         decoder.start_decoder()
 
