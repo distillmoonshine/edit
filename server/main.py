@@ -1,5 +1,5 @@
 import asyncio
-
+from aiortc.contrib.media import MediaPlayer
 import aiortc.contrib.media
 from aiohttp import web
 import socketio
@@ -43,12 +43,12 @@ async def socketio_connect(sid, data):
 
 
 @socket.on("disconnect")
-def socketio_disconnected(sid):
+async def socketio_disconnected(sid):
     print("Client with sid " + sid + " disconnected.")
     if sid in rtc_peer_connections:
         asyncio.get_event_loop().run_until_complete(rtc_peer_connections[sid].close())
         del rtc_peer_connections[sid]
-    socket.emit("disconnect", f"user {sid} disconnected from server.")
+    await socket.emit("disconnect", f"user {sid} disconnected from server.")
 
 
 @socket.on("editor/addLayer")
@@ -110,10 +110,9 @@ async def connect(sid, params):
     # handle offer
     await pc.setRemoteDescription(offer)
 
-
     player = MediaPlaylist()
     player.add_file("videos/marcrober.mp4")
-    player.add_file("videos/marcrober1.mp4")
+    player.add_file("videos/marcrober2.mp4")
     if player.video:
         pc.addTrack(player.video)
     if player.audio:

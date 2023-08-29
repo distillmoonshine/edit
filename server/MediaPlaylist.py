@@ -110,6 +110,9 @@ def player_worker_decode(
     throttle_playback,
     loop_playback = False,
 ):
+    print("Decoding container:", container)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     audio_sample_rate = 48000
     audio_samples = 0
     audio_time_base = fractions.Fraction(1, audio_sample_rate)
@@ -129,7 +132,7 @@ def player_worker_decode(
         try:
             frame = next(container.decode(*container.streams))
         except Exception as exc:
-            print("exception: ", type(exc), traceback.format_exc())
+            print("PlayerWorkerDecode_exception: ", type(exc), traceback.format_exc())
             print("File: ", container)
             if isinstance(exc, av.FFmpegError) and exc.errno == errno.EAGAIN:
                 time.sleep(0.01)
@@ -138,9 +141,11 @@ def player_worker_decode(
                 container.seek(0)
                 continue
             if audio_track:
-                asyncio.run_coroutine_threadsafe(audio_track.put(None), loop)
+                asyncio.get_event_loop().run_until_complete(audio_track.put(None))
+                # asyncio.run_coroutine_threadsafe(audio_track.put(None), loop)
             if video_track:
-                asyncio.run_coroutine_threadsafe(video_track.put(None), loop)
+                asyncio.get_event_loop().run_until_complete(video_track.put(None))
+                # asyncio.run_coroutine_threadsafe(video_track.put(None), loop)
             break
 
         # read up to 1 second ahead
@@ -157,7 +162,8 @@ def player_worker_decode(
                 audio_samples += frame.samples
 
                 frame_time = frame.time
-                asyncio.run_coroutine_threadsafe(audio_track.put(frame), loop)
+                loop.run_until_complete(audio_track.put(frame))
+                # asyncio.run_coroutine_threadsafe(audio_track.put(frame), loop)
         elif isinstance(frame, VideoFrame) and video_track:
             if frame.pts is None:  # pragma: no cover
                 logger.warning(
@@ -171,6 +177,7 @@ def player_worker_decode(
             frame.pts -= video_first_pts
 
             frame_time = frame.time
+            asyncio.get_event_loop().run_until_complete(video_track.put(frame))
             asyncio.run_coroutine_threadsafe(video_track.put(frame), loop)
     quit_event.set()
     playlist.load_next_media()
@@ -201,7 +208,6 @@ class StreamDecoder:
     def start_decoder(self):
         self.thread.start()
 
-
 class PlaylistStreamTrack(MediaStreamTrack):
     def __init__(self, player, kind):
         super().__init__()
@@ -220,7 +226,7 @@ class PlaylistStreamTrack(MediaStreamTrack):
             if not self._queue[0].empty():
                 return await self._queue[0].get()
             else:
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.2)
                 return await self._dequeue()
                 print("Queue complete, loading next...")
                 self._queue.popleft()
@@ -236,6 +242,7 @@ class PlaylistStreamTrack(MediaStreamTrack):
 
         self._player._start(self)
         data = await self._dequeue()
+        print(data)
         # data = await self._queue[0].get()
 
         if data is None:
