@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import logging
+logger = logging.getLogger(__name__)
 import errno
 import traceback
 
@@ -9,110 +10,29 @@ from av import AudioFrame, VideoFrame
 import fractions
 import time
 from aiortc.mediastreams import VIDEO_PTIME, VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamTrack
-from aiortc.contrib.media import MediaStreamError, AUDIO_PTIME, REAL_TIME_FORMATS
-import uuid
+from aiortc.contrib.media import MediaStreamError, AUDIO_PTIME, REAL_TIME_FORMATS, PlayerStreamTrack
 from av.frame import Frame
 from av.packet import Packet
-from abc import ABCMeta, abstractmethod
 from typing import Optional, Set, Union, Tuple
-from pyee.asyncio import AsyncIOEventEmitter
 from collections import deque
 
 
-# class MediaStreamTrack(AsyncIOEventEmitter, metaclass=ABCMeta):
-#     """
-#     A single media track within a stream.
-#     """
-#
-#     kind = "unknown"
-#
-#     def __init__(self) -> None:
-#         super().__init__()
-#         self.__ended = False
-#         self._id = str(uuid.uuid4())
-#
-#     @property
-#     def id(self) -> str:
-#         """
-#         An automatically generated globally unique ID.
-#         """
-#         return self._id
-#
-#     @property
-#     def readyState(self) -> str:
-#         return "ended" if self.__ended else "live"
-#
-#     @abstractmethod
-#     async def recv(self) -> Union[Frame, Packet]:
-#         """
-#         Receive the next :class:`~av.audio.frame.AudioFrame`, :class:`~av.video.frame.VideoFrame`
-#         or :class:`~av.packet.Packet`
-#         """
-#
-#     def stop(self) -> None:
-#         if not self.__ended:
-#             self.__ended = True
-#             self.emit("ended")
-#
-#             # no more events will be emitted, so remove all event listeners
-#             # to facilitate garbage collection.
-#             self.remove_all_listeners()
 
+"""
+playlist_decode: Decodes video files and enqueues the frames into audio/video tracks. Intended to run on separate thread.
 
-class VideoStreamTrack(MediaStreamTrack):
-    """
-    A dummy video track which reads green frames.
-    """
-
-    kind = "video"
-
-    _start: float
-    _timestamp: int
-
-    async def next_timestamp(self) -> Tuple[int, fractions.Fraction]:
-        if self.readyState != "live":
-            raise MediaStreamError
-
-        if hasattr(self, "_timestamp"):
-            self._timestamp += int(VIDEO_PTIME * VIDEO_CLOCK_RATE)
-            wait = self._start + (self._timestamp / VIDEO_CLOCK_RATE) - time.time()
-            await asyncio.sleep(wait)
-        else:
-            self._start = time.time()
-            self._timestamp = 0
-        return self._timestamp, VIDEO_TIME_BASE
-
-    async def recv(self) -> Frame:
-        """
-        Receive the next :class:`~av.video.frame.VideoFrame`.
-
-        The base implementation just reads a 640x480 green frame at 30fps,
-        subclass :class:`VideoStreamTrack` to provide a useful implementation.
-        """
-        pts, time_base = await self.next_timestamp()
-
-        frame = VideoFrame(width=640, height=480)
-        for p in frame.planes:
-            p.update(bytes(p.buffer_size))
-        frame.pts = pts
-        frame.time_base = time_base
-        return frame
-
-logger = logging.getLogger(__name__)
-
-def player_worker_decode(
-    loop,
-    playlist,
-    container,
-    audio_track,
-    video_track,
-    quit_event,
-    throttle_playback,
-    loop_playback = False,
+playlist_decode(
+    loop: asyncio.events,               # asyncio loop
+    playlist_queue: deque,              # deque containing video files
+    audio_track: PlaylistStreamTrack,   # audio track containing queue for decoded audio frames
+    video_track: PlaylistStreamTrack,   # video track containing queue for decoded video frames
+    thread_quit: threading.Event        # If thread_quit is "set" (thread_quit.set()) then decoding loop exits
+)
+"""
+def playlist_decode(
+    loop, playlist_queue, audio_track, video_track, thread_quit
 ):
-    print("Decoding container:", container)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    print("Playlist decode start", audio_track, video_track)
     audio_sample_rate = 48000
     audio_samples = 0
     audio_time_base = fractions.Fraction(1, audio_sample_rate)
@@ -123,37 +43,62 @@ def player_worker_decode(
         frame_size=int(audio_sample_rate * AUDIO_PTIME),
     )
 
-    video_first_pts = None
+    container = 0
+    current_streams = []
 
-    frame_time = None
-    start_time = time.time()
+    if len(playlist_queue) == 0:
+        return None
+    file = playlist_queue.popleft()
+    current_streams = []
+    audio_exists, video_exists = False, False
+    container = av.open(file=file, format=None, mode="r", options={}, timeout=None)
 
-    while not quit_event.is_set():
+    # set up CURRENT_STREAMS array to be used in container.decode(*streams) method
+    for stream in container.streams:
+        if stream.type == "audio" and not audio_exists:
+            current_streams.append(stream)
+            audio_exists = True  # limit to only one audio track
+        elif stream.type == "video" and not video_exists:
+            current_streams.append(stream)
+            video_exists = True  # limit to only one video track
+
+    while not thread_quit.is_set():
         try:
-            frame = next(container.decode(*container.streams))
+            frame = next(container.decode(*current_streams))
         except Exception as exc:
-            print("PlayerWorkerDecode_exception: ", type(exc), traceback.format_exc())
-            print("File: ", container)
+            print(traceback.format_exc())
+            if isinstance(exc, StopIteration):
+                # end of video file reached, move onto next video file if exists
+                if len(playlist_queue) == 0:
+                    print("End of playlist")
+                    return None
+                file = playlist_queue.popleft()
+                print("STOPITERATION, loading next file: ", file)
+                current_streams = []
+                audio_exists, video_exists = False, False
+                container = av.open(file=file, format=None, mode="r", options={}, timeout=None)
+
+                # set up CURRENT_STREAMS array to be used in container.decode(*streams) method
+                for stream in container.streams:
+                    if stream.type == "audio" and not audio_exists:
+                        current_streams.append(stream)
+                        audio_exists = True  # limit to only one audio track
+                    elif stream.type == "video" and not video_exists:
+                        current_streams.append(stream)
+                        video_exists = True  # limit to only one video track
+
+                print(container, current_streams)
+
+                time.sleep(0.05)
+                continue
             if isinstance(exc, av.FFmpegError) and exc.errno == errno.EAGAIN:
                 time.sleep(0.01)
                 continue
-            if isinstance(exc, StopIteration) and loop_playback:
-                container.seek(0)
-                continue
             if audio_track:
-                asyncio.get_event_loop().run_until_complete(audio_track.put(None))
-                # asyncio.run_coroutine_threadsafe(audio_track.put(None), loop)
+                asyncio.run_coroutine_threadsafe(audio_track._queue.put(None), loop)
             if video_track:
-                asyncio.get_event_loop().run_until_complete(video_track.put(None))
-                # asyncio.run_coroutine_threadsafe(video_track.put(None), loop)
+                asyncio.run_coroutine_threadsafe(video_track._queue.put(None), loop)
             break
-
-        # read up to 1 second ahead
-        if throttle_playback:
-            elapsed_time = time.time() - start_time
-            if frame_time and frame_time > elapsed_time + 1:
-                time.sleep(0.1)
-
         if isinstance(frame, AudioFrame) and audio_track:
             for frame in audio_resampler.resample(frame):
                 # fix timestamps
@@ -162,8 +107,7 @@ def player_worker_decode(
                 audio_samples += frame.samples
 
                 frame_time = frame.time
-                loop.run_until_complete(audio_track.put(frame))
-                # asyncio.run_coroutine_threadsafe(audio_track.put(frame), loop)
+                asyncio.run_coroutine_threadsafe(audio_track._queue.put(frame), loop)
         elif isinstance(frame, VideoFrame) and video_track:
             if frame.pts is None:  # pragma: no cover
                 logger.warning(
@@ -171,82 +115,84 @@ def player_worker_decode(
                 )
                 continue
 
-            # video from a webcam doesn't start at pts 0, cancel out offset
-            if video_first_pts is None:
-                video_first_pts = frame.pts
-            frame.pts -= video_first_pts
+            asyncio.run_coroutine_threadsafe(video_track._queue.put(frame), loop)
 
-            frame_time = frame.time
-            asyncio.get_event_loop().run_until_complete(video_track.put(frame))
-            asyncio.run_coroutine_threadsafe(video_track.put(frame), loop)
-    quit_event.set()
-    playlist.load_next_media()
+class MediaPlaylist:
+    def __init__(self):
+        # audio and video tracks for playlist, decoded frames to be enqueued here
+        self.__audio: Optional[PlayerStreamTrack] = PlaylistStreamTrack(self, kind="audio")
+        self.__video: Optional[PlayerStreamTrack] = PlaylistStreamTrack(self, kind="video")
+        self.__thread: Optional[threading.Thread] = None
+        self.__playlist_queue = deque()
+        self.__started = set()
+        self.__thread_quit: threading.Event = None
+        self.__thread: threading.Thread = None
+        self._throttle_playback = False
 
+    def add_file(self, file):
+        self.__playlist_queue.append(file)
+        if len(self.__started) == 0:
+            self._start(1)
 
-class StreamDecoder:
-    def __init__(self, playlist, file, audio_queue, video_queue):
-        self.container = av.open(file=file, format=None, mode="r")
-        self.thread_quit_event = threading.Event()
-
-        container_format = set(self.container.format.name.split(","))
-        self._throttle_playback = not container_format.intersection(REAL_TIME_FORMATS)
-        self.thread = threading.Thread(
-            name="player",
-            target=player_worker_decode,
-            args=(
-                asyncio.get_event_loop(),
-                playlist,
-                self.container,
-                audio_queue,
-                video_queue,
-                self.thread_quit_event,
-                self._throttle_playback
+    def _start(self, track: PlayerStreamTrack):
+        self.__started.add(track)
+        if self.__thread is None:
+            self.__log_debug("Starting worker thread")
+            print("Start work!")
+            self.__thread_quit = threading.Event()
+            self.__thread = threading.Thread(
+                name="media-playlist-decoder",
+                target=playlist_decode,
+                args=(
+                    asyncio.get_event_loop(),
+                    self.__playlist_queue,
+                    self.__audio,
+                    self.__video,
+                    self.__thread_quit
+                )
             )
-        )
-        print(f"{threading.get_ident()} StreamDecoder for file {file} is created")
+            self.__thread.start()
+    def stop(self):
+        self.__thread_quit.set()
 
-    def start_decoder(self):
-        self.thread.start()
+    def _stop(self):
+        print("_stop called")
+
+    @property
+    def audio(self) -> MediaStreamTrack:
+        """
+        A :class:`aiortc.MediaStreamTrack` instance if the file contains audio.
+        """
+        return self.__audio
+
+    @property
+    def video(self) -> MediaStreamTrack:
+        """
+        A :class:`aiortc.MediaStreamTrack` instance if the file contains video.
+        """
+        return self.__video
+
+    def __log_debug(self, msg: str, *args) -> None:
+        logger.debug(f"MediaPlayer(%s) {msg}", *args)
+
+
 
 class PlaylistStreamTrack(MediaStreamTrack):
     def __init__(self, player, kind):
         super().__init__()
         self.kind = kind
         self._player = player
-        self._queue = deque()
+        self._queue = asyncio.Queue()
         self._start = None
-
-    def create_new_stream(self):
-        queue = asyncio.Queue()
-        self._queue.append(queue)
-        return queue
-
-    async def _dequeue(self):
-        if len(self._queue) > 0:
-            if not self._queue[0].empty():
-                return await self._queue[0].get()
-            else:
-                await asyncio.sleep(0.2)
-                return await self._dequeue()
-                print("Queue complete, loading next...")
-                self._queue.popleft()
-                return await self._dequeue()
-        else:
-            await asyncio.sleep(0.01)
-            return await self._dequeue()
 
     async def recv(self) -> Union[Frame, Packet]:
         if self.readyState != "live":
-            print("Ready state not live")
             raise MediaStreamError
 
         self._player._start(self)
-        data = await self._dequeue()
-        print(data)
-        # data = await self._queue[0].get()
-
+        data = await self._queue.get()
         if data is None:
-            print("Data is None")
+            pass
             self.stop()
             raise MediaStreamError
         if isinstance(data, Frame):
@@ -256,83 +202,18 @@ class PlaylistStreamTrack(MediaStreamTrack):
 
         # control playback rate
         if (
-            self._player is not None
-            and self._player._throttle_playback
-            and data_time is not None
+            # self._player is not None
+            # and self._player._throttle_playback
+            # and data_time is not None
+            True
         ):
             if self._start is None:
                 self._start = time.time() - data_time
             else:
                 wait = self._start + data_time - time.time()
                 await asyncio.sleep(wait)
+
         return data
 
     def stop(self):
-        super().stop()
-        if self._player is not None:
-            self._player._stop(self)
-            self._player = None
-
-    def next_video(self):
-        self._queue.popleft()
-
-
-class MediaPlaylist:
-    def __init__(self):
-        self.__decoders = deque()
-        self.__audio = PlaylistStreamTrack(self, kind="audio")
-        self.__video = PlaylistStreamTrack(self, kind="video")
-        self.__streams = []
-        self.__started: Set[PlaylistStreamTrack] = set()
-        self.__playlist_queue = deque()
-        self._throttle_playback = False     # True if livestream
-        self._has_started = False
-
-        self.__streams.append(self.__audio)
-        self.__streams.append(self.__video)
-
-        # self.add_file("videos/marcrober.mp4")
-        # self.load_next_media()
-
-    @property
-    def audio(self) -> MediaStreamTrack:
-        return self.__audio
-
-    @property
-    def video(self) -> MediaStreamTrack:
-        return self.__video
-
-    def add_file(self, file):
-        print("[MediaPlaylist.add_file], file: ", file)
-        self.__playlist_queue.append(file)
-        if not self._has_started:
-            self._has_started = True
-            self.load_next_media()
-
-    def _start(self, track: PlaylistStreamTrack) -> None:
-        self.__started.add(track)
-        if len(self.__decoders) > 0 and self.__decoders[0].thread_quit_event.is_set():
-            self.__decoders.popleft()
-            self.load_next_media()
-
-    def load_next_media(self):
-        if len(self.__playlist_queue) == 0:
-            # self._stop()
-            return
-
-        file = self.__playlist_queue.popleft()
-        audio_queue = self.__audio.create_new_stream()
-        video_queue = self.__video.create_new_stream()
-        decoder = StreamDecoder(self, file, audio_queue, video_queue)
-        self.__decoders.append(decoder)
-        decoder.start_decoder()
-
-    def _stop(self, track: PlaylistStreamTrack) -> None:
-        self.__started.discard(track)
-        # find the code stop call was placed
-        import traceback
-        print(traceback.format_stack())
-        print("Stop")
-
-    def __log_debug(self, msg: str, *args) -> None:
-        print(f"MediaPlayer {msg}", *args)
+        print("PlaylistStreamTrack stop called")
